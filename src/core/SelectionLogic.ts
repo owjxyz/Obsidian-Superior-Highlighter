@@ -468,7 +468,7 @@ export class SelectionLogic {
             raw: originalRaw,
             pOffset: lastOffset + fmOffset,
         });
-        const result = this.applyStructuralFilter({ text: virtualText, segments });
+        const result = this.applyStructuralFilter({ text: virtualText, segments }, virtualText, true);
         opContext.cache.set(cacheKey, result);
         return result;
     }
@@ -578,7 +578,7 @@ export class SelectionLogic {
 
     // Structural Filtering Engine (Noise Shield)
     // Computationally strips invisible markdown syntax while keeping offsets perfectly mapped
-    applyStructuralFilter({ text, segments }: Virtual, footnoteSource = text): Virtual {
+    applyStructuralFilter({ text, segments }: Virtual, footnoteSource = text, preserveCallouts = false): Virtual {
         const definedFootnotes = new Set([...footnoteSource.matchAll(/^\[\^([^\]]+)\]:/gm)].map((match) => match[1]));
         const footnoteRefs = /\[\^[^\]]+\](?!:)/g;
         const patterns = [
@@ -599,7 +599,7 @@ export class SelectionLogic {
             // Task checkmarks: - [x] or - [ ]
             /-\s\[[ xX]\]/g,
             // Callout prefixes: > [!WARNING]
-            />\s*\[![^\]]+\]/g,
+            ...(!preserveCallouts ? [/>\s*\[![^\]]+\]/g] : []),
             // Block IDs: ^abc123 (hidden in reading view)
             /[ \t]\^[a-zA-Z0-9-]+(?=\s|$)/g,
             // Plugin-injected highlighting

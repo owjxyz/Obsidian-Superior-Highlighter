@@ -101,6 +101,7 @@ export function readBlockTextAndCaret(block: NodeLike | null, range: RangeLike |
         if (
             node.classList?.contains("footnote-ref") ||
             node.classList?.contains("footnote-backref") ||
+            node.classList?.contains("mod-empty-attachment") ||
             node.classList?.contains("math")
         )
             return;

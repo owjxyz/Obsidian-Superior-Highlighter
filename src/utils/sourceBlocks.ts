@@ -42,6 +42,7 @@ const FOOTNOTE_DEF_RE = /^\s{0,3}\[\^[^\]]+\]:/;
 const TABLE_ROW_RE = /^\s*\|/;
 const FENCE_RE = /^\s{0,3}(?:```|~~~)/;
 const THEMATIC_BREAK_RE = /^\s{0,3}(?:\*\s*\*\s*\*|-\s*-\s*-|_\s*_\s*_)[\s*\-_]*$/;
+const CALLOUT_RE = /^\s*(?:>\s*)+\[![^\]\n]+\]/;
 
 /**
  * Cell ranges within a table row, split on unescaped pipes. `\|` is content —
@@ -143,6 +144,10 @@ export function splitSourceBlocks(text: string, offset = 0): SourceBlock[] {
                     blocks.push({ start: cell.start + offset, end: cell.end + offset, kind: "table" });
                 }
             }
+        } else if (CALLOUT_RE.test(line)) {
+            // The title and body render in separate elements, even without a blank line.
+            flush();
+            blocks.push({ start: lineStart + offset, end: contentEnd + offset, kind: "paragraph" });
         } else if (ownBlockKind(line)) {
             flush();
             blockStart = lineStart;

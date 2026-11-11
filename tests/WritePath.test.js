@@ -62,6 +62,32 @@ export async function highlightRange(ctx, startNode, startOff, endNode, endOff) 
     await ctx.plugin.highlightSelection(ctx.view, { text: range.toString(), range });
 }
 
+describe("reading view generated content", () => {
+    it("highlights the correct text beside a missing image without editing its error message", async () => {
+        const raw = "![[missing.png]]\nrate and rate";
+        const html =
+            '<p><span class="internal-embed file-embed mod-empty-attachment">Missing rate</span><br>rate and rate</p>';
+        const ctx = await setup(raw, html);
+        const node = textNodes(ctx.content).at(-1);
+        await highlightRange(ctx, node, 9, node, 13);
+        expect(ctx.out()).toBe("![[missing.png]]\nrate and ==rate==");
+
+        const error = textNodes(ctx.content)[0];
+        await highlightRange(ctx, error, 0, error, 7);
+        expect(ctx.out()).toBe("![[missing.png]]\nrate and ==rate==");
+    });
+
+    it("highlights callout body text independently of its title and preserves links", async () => {
+        const raw = "> [!info] Title\n> Source: [[target|reference]]. rate\n> More rate";
+        const html =
+            '<div class="callout"><div class="callout-title-inner">Title</div><div class="callout-content"><p>Source: <a>reference</a>. rate<br>More rate</p></div></div>';
+        const ctx = await setup(raw, html);
+        const node = textNodes(ctx.content).at(-1);
+        await highlightRange(ctx, node, 5, node, 9);
+        expect(ctx.out()).toBe("> [!info] Title\n> Source: [[target|reference]]. rate\n> More ==rate==");
+    });
+});
+
 describe("issue 3: list marker must stay outside the highlight", () => {
     const raw = [
         "# Título",
