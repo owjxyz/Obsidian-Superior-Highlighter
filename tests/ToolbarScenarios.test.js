@@ -2,8 +2,9 @@ import { describe, it, expect, vi } from "vitest";
 import ReadingHighlighterPlugin from "../src/main";
 import { FloatingManager } from "../src/ui/FloatingManager";
 import { Platform } from "./obsidian-stub.js";
-import { createObsidianWindow, renderHtml } from "./dom-helpers.js";
+import { createObsidianWindow, polyfillGeometry, renderHtml } from "./dom-helpers.js";
 import { JSDOM } from "jsdom";
+import { EditorView } from "@codemirror/view";
 
 async function setup(opts = {}) {
     const window = createObsidianWindow();
@@ -33,7 +34,8 @@ async function setup(opts = {}) {
     const settingsWindow = opts.focusedSettings ? new JSDOM("<!doctype html><html><body></body></html>").window : null;
     if (settingsWindow) vi.stubGlobal("activeDocument", settingsWindow.document);
     try {
-        if (settingsWindow) {
+        opts.beforeLoad?.(plugin);
+        if (settingsWindow || opts.beforeLoad) {
             await plugin.onload();
         } else {
             await plugin.loadSettings();
@@ -63,6 +65,70 @@ const visible = (ctx) => {
 };
 
 describe("scenarios", () => {
+    it("uses the exact editor selection for toolbar actions only while the editor toggle is enabled", async () => {
+        // CodeMirror also uses the global document for its measurement range.
+        polyfillGeometry(window);
+        const extensions = [];
+        let settingsTab;
+        const ctx = await setup({
+            mode: "source",
+            beforeLoad(plugin) {
+                plugin.registerEditorExtension = (extension) => extensions.push(extension);
+                plugin.addSettingTab = (tab) => {
+                    settingsTab = tab;
+                    tab.update = () => {};
+                };
+            },
+        });
+        const original = "First Some text. Second Some text.";
+        const editor = new EditorView({ doc: original, parent: ctx.content, extensions });
+        const selectEditorText = () => {
+            const from = editor.state.doc.toString().lastIndexOf("Some text");
+            editor.dispatch({ selection: { anchor: from + 9, head: from } });
+        };
+        const press = (selector) => {
+            ctx.doc.querySelector(selector).dispatchEvent(new ctx.window.MouseEvent("mousedown"));
+        };
+        const toggle = async (value) => {
+            settingsTab.setControlValue("showToolbarInEditor", value);
+            await Promise.resolve();
+        };
+
+        try {
+            editor.focus();
+            selectEditorText();
+            expect(visible(ctx)).toBe(false);
+
+            expect(settingsTab.getSettingDefinitions().flatMap(({ items }) => items)).toEqual(
+                expect.arrayContaining([
+                    expect.objectContaining({ control: { type: "toggle", key: "showToolbarInEditor" } }),
+                ])
+            );
+            await toggle(true);
+            selectEditorText();
+            expect(visible(ctx)).toBe(true);
+            press(".reading-highlighter-btn");
+            expect(editor.state.doc.toString()).toBe("First Some text. Second ==Some text==.");
+
+            selectEditorText();
+            press('[data-color-index="0"]');
+            expect(editor.state.doc.toString()).toBe("First Some text. Second ==🔴Some text==.");
+
+            selectEditorText();
+            press(".reading-highlighter-remove-btn");
+            expect(editor.state.doc.toString()).toBe(original);
+
+            await toggle(false);
+            selectEditorText();
+            expect(visible(ctx)).toBe(false);
+            ctx.setMode("preview");
+            select(ctx);
+            expect(visible(ctx)).toBe(true);
+        } finally {
+            editor.destroy();
+        }
+    });
+
     it.each([false, true])(
         "selecting a note after enabling from settings shows the toolbar (no view at load: %s)",
         async (noView) => {

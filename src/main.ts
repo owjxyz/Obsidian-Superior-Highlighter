@@ -10,6 +10,7 @@ import {
     type Command,
     type SettingDefinitionItem,
 } from "obsidian";
+import { EditorView } from "@codemirror/view";
 import { FloatingManager, type SelectionSnapshot } from "./ui/FloatingManager";
 import { SelectionLogic } from "./core/SelectionLogic";
 import { HighlightNavigatorView, HIGHLIGHT_NAVIGATOR_VIEW } from "./views/HighlightNavigator";
@@ -47,6 +48,7 @@ interface LegacyColorSettings {
 
 interface ReadingHighlighterSettings {
     toolbarPosition: string;
+    showToolbarInEditor: boolean;
     /** Colour the plain highlight button writes; empty for the theme's default. */
     defaultHighlightColor: HighlightColor | "";
     enableHaptics: boolean;
@@ -62,6 +64,7 @@ const SMART_SELECTION_TAGS = new Set(["P", "LI", "BLOCKQUOTE", "PRE", "H1", "H2"
 
 const DEFAULT_SETTINGS: ReadingHighlighterSettings = {
     toolbarPosition: "text",
+    showToolbarInEditor: false,
     defaultHighlightColor: "",
     enableHaptics: true,
     showRemoveButton: true,
@@ -111,6 +114,16 @@ export default class ReadingHighlighterPlugin extends Plugin {
 
         this.addSettingTab(new ReadingHighlighterSettingTab(this.app, this));
         this.registerCommands();
+        this.registerEditorExtension(
+            EditorView.updateListener.of((update) => {
+                if (
+                    this.settings.showToolbarInEditor &&
+                    (update.selectionSet || update.focusChanged || update.docChanged)
+                ) {
+                    this.floatingManager.handleSelection();
+                }
+            })
+        );
 
         // Preferences may have focus when the plugin is enabled.
         this.registerWindowEvents(this.floatingManager.targetDocument());
@@ -866,10 +879,7 @@ export default class ReadingHighlighterPlugin extends Plugin {
         return lineBreak === -1 ? raw.length : lineBreak;
     }
 
-    async applyMarkdownModification(file: TFile, raw: string, start: number, end: number, mode: string, payload = "") {
-        if (!raw) {
-            raw = await this.app.vault.read(file);
-        }
+    editSelectionRange(raw: string, start: number, end: number, mode: string, payload?: string) {
         const touched = parseHighlights(raw).highlights.find((h) => h.innerStart < end && h.innerEnd > start);
         const color =
             (mode === "color" || mode === "toggle-color") && isHighlightColor(payload)
@@ -877,9 +887,44 @@ export default class ReadingHighlighterPlugin extends Plugin {
                 : touched
                   ? touched.color
                   : this.settings.defaultHighlightColor || null;
+        return editHighlightRange(raw, start, end, mode, color);
+    }
+
+    editEditorHighlight(editor: EditorView, mode: string, color?: HighlightColor) {
+        const { from, to } = editor.state.selection.main;
+        const raw = editor.state.doc.toString();
+        let updated: string;
+        try {
+            updated = this.editSelectionRange(raw, from, to, mode, color);
+        } catch (error) {
+            new Notice(error instanceof Error ? error.message : "The selection cannot be highlighted safely.");
+            return;
+        }
+        if (updated === raw) return;
+
+        // Apply only the changed span so the editor retains the surrounding document and its undo history.
+        let start = 0;
+        let end = raw.length;
+        let newEnd = updated.length;
+        while (start < end && start < newEnd && raw[start] === updated[start]) start++;
+        while (end > start && newEnd > start && raw[end - 1] === updated[newEnd - 1]) {
+            end--;
+            newEnd--;
+        }
+        editor.dispatch({
+            changes: { from: start, to: end, insert: updated.slice(start, newEnd) },
+            selection: { anchor: newEnd },
+            userEvent: "input.replace",
+        });
+    }
+
+    async applyMarkdownModification(file: TFile, raw: string, start: number, end: number, mode: string, payload = "") {
+        if (!raw) {
+            raw = await this.app.vault.read(file);
+        }
         let newContent: string;
         try {
-            newContent = editHighlightRange(raw, start, end, mode, color);
+            newContent = this.editSelectionRange(raw, start, end, mode, payload);
         } catch (error) {
             new Notice(error instanceof Error ? error.message : "The selection cannot be highlighted safely.");
             return false;
@@ -972,6 +1017,11 @@ class ReadingHighlighterSettingTab extends PluginSettingTab {
                                 right: "Fixed right side",
                             },
                         },
+                    },
+                    {
+                        name: "Show toolbar in editing mode",
+                        desc: "Show the floating toolbar when selecting text in Live Preview or Source mode.",
+                        control: { type: "toggle", key: "showToolbarInEditor" },
                     },
                     {
                         name: "Enable smart paragraph selection",

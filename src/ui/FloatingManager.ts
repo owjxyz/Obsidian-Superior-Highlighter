@@ -1,8 +1,7 @@
 import { setIcon, MarkdownView, Platform, App } from "obsidian";
+import { EditorView } from "@codemirror/view";
 import type ReadingHighlighterPlugin from "../main";
-import { COLOR_LABELS, HIGHLIGHT_COLORS } from "../utils/colors";
-
-type ActionName = "highlightSelection" | "removeHighlightSelection";
+import { COLOR_LABELS, HIGHLIGHT_COLORS, type HighlightColor } from "../utils/colors";
 
 export interface SelectionSnapshot {
     text: string;
@@ -74,12 +73,12 @@ export class FloatingManager {
         // Deliberately not shown here. Visibility belongs to `selectionchange`,
         // and a settings change is made from the settings window — showing the
         // toolbar at that moment puts it on top of the settings, not in a note.
-        // `createElements` has placed it in the reading view's document, so the
+        // `createElements` has placed it in the note's document, so the
         // next selection there brings it up.
     }
 
     /**
-     * The document the toolbar belongs in — the one holding the reading view,
+     * The document the toolbar belongs in — the one holding the note,
      * not whichever window happens to be focused.
      *
      * `activeDocument` follows focus, and in Obsidian 1.13 the settings window
@@ -163,18 +162,24 @@ export class FloatingManager {
     }
 
     registerEvents() {
-        const preventFocus = (evt: Event) => {
-            evt.preventDefault();
-            evt.stopPropagation();
-        };
-
-        const attachAction = (btn: HTMLButtonElement | null, actionName: ActionName) => {
+        const attachAction = (
+            btn: HTMLButtonElement | null,
+            readingAction: (view: MarkdownView) => Promise<void>,
+            mode: "highlight" | "remove" | "color",
+            color?: HighlightColor
+        ) => {
             if (!btn) return;
 
             const handler = (evt: Event) => {
-                preventFocus(evt);
+                evt.preventDefault();
+                evt.stopPropagation();
                 const view = this.plugin.getActiveReadingView();
-                if (view) void this.plugin[actionName](view, this._selectionSnapshot);
+                if (view) {
+                    void readingAction(view);
+                } else {
+                    const editor = this.getActiveToolbarEditor();
+                    if (editor) this.plugin.editEditorHighlight(editor, mode, color);
+                }
 
                 this.hide();
             };
@@ -183,25 +188,35 @@ export class FloatingManager {
             btn.addEventListener("touchstart", handler, { passive: false });
         };
 
-        // Main actions
-        attachAction(this.highlightBtn, "highlightSelection");
-        attachAction(this.removeBtn, "removeHighlightSelection");
+        attachAction(
+            this.highlightBtn,
+            (view) => this.plugin.highlightSelection(view, this._selectionSnapshot),
+            "highlight"
+        );
+        attachAction(
+            this.removeBtn,
+            (view) => this.plugin.removeHighlightSelection(view, this._selectionSnapshot),
+            "remove"
+        );
+        for (const [index, btn] of this.colorButtons.entries()) {
+            attachAction(
+                btn,
+                (view) => this.plugin.applyColorByIndex(view, index, this._selectionSnapshot),
+                "color",
+                HIGHLIGHT_COLORS[index]
+            );
+        }
+    }
 
-        // Color palette buttons
-        this.colorButtons.forEach((btn) => {
-            // Native colour order matches the colour shortcut indices.
-            const index = Number(btn.getAttribute("data-color-index"));
-            const handler = (evt: Event) => {
-                preventFocus(evt);
-                const view = this.plugin.getActiveReadingView();
-                if (view) void this.plugin.applyColorByIndex(view, index, this._selectionSnapshot);
-
-                this.hide();
-            };
-
-            btn.addEventListener("mousedown", handler);
-            btn.addEventListener("touchstart", handler, { passive: false });
-        });
+    getActiveToolbarEditor(): EditorView | null {
+        if (!this.plugin.settings.showToolbarInEditor) return null;
+        const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+        if (view?.getMode() !== "source") return null;
+        const editor = EditorView.findFromDOM(view.contentEl);
+        if (!editor?.hasFocus || editor.state.readOnly || editor.state.selection.ranges.length !== 1) return null;
+        if (editor.dom.ownerDocument.querySelector(".modal-container, .modal-bg")) return null;
+        const { from, to } = editor.state.selection.main;
+        return editor.state.sliceDoc(from, to).trim() ? editor : null;
     }
 
     setupMobileGestures() {
@@ -281,7 +296,14 @@ export class FloatingManager {
         const view = this.plugin.getActiveReadingView();
         if (!view) {
             this._selectionSnapshot = null;
-            this.hide();
+            const editor = this.getActiveToolbarEditor();
+            if (editor) {
+                const { head, anchor } = editor.state.selection.main;
+                const rect = editor.coordsAtPos(head, head > anchor ? -1 : 1) ?? editor.coordsAtPos(anchor);
+                this.show(rect ?? editor.scrollDOM.getBoundingClientRect());
+            } else {
+                this.hide();
+            }
             return;
         }
 
@@ -327,7 +349,7 @@ export class FloatingManager {
         }
     }
 
-    show(rect: DOMRect, parent: HTMLElement | null = null) {
+    show(rect: Pick<DOMRect, "top" | "bottom" | "left" | "right">, parent: HTMLElement | null = null) {
         if (!this.containerEl || !rect) return;
         // A note can be moved to a popout window after the toolbar was built.
         // Rebuild into the right document rather than showing it in the old one.
@@ -371,14 +393,14 @@ export class FloatingManager {
                 }
                 if (top < margin) top = margin;
 
-                const left = clampLeft(rect.left + rect.width / 2 - containerWidth / 2);
+                const left = clampLeft((rect.left + rect.right - containerWidth) / 2);
                 this.containerEl.setCssStyles({ top: `${top}px`, left: `${left}px` });
             } else {
                 // ── iOS / Desktop: place toolbar ABOVE the selection (original) ──
                 let top = rect.top - containerHeight - margin;
                 if (top < margin) top = rect.bottom + margin;
 
-                const left = clampLeft(rect.left + rect.width / 2 - containerWidth / 2);
+                const left = clampLeft((rect.left + rect.right - containerWidth) / 2);
                 this.containerEl.setCssStyles({ top: `${top}px`, left: `${left}px` });
             }
         } else if (pos === "top") {

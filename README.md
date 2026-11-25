@@ -15,7 +15,7 @@ Highlight exactly what you select in Obsidian Reading View, using surrounding te
 ## Install and use
 
 1. Open **Settings → Community plugins → Browse**, search for **Superior Highlighter**, and install and enable it.
-2. Select text in **Reading View** and choose a toolbar action.
+2. Select text in **Reading View** and choose a toolbar action. To use the toolbar in **Live Preview** or **Source mode**, turn on **Show toolbar in editing mode** in the plugin settings.
 3. To use shortcuts, assign keys under **Settings → Hotkeys → Superior Highlighter**.
 
 Manual installation: copy `main.js`, `manifest.json`, and `styles.css` from the [latest release](https://github.com/owjxyz/Obsidian-Superior-Highlighter/releases/latest) into `<vault>/.obsidian/plugins/superior-highlighter/`, then enable the plugin.

@@ -28,9 +28,11 @@ __export(main_exports, {
 });
 module.exports = __toCommonJS(main_exports);
 var import_obsidian6 = require("obsidian");
+var import_view2 = require("@codemirror/view");
 
 // src/ui/FloatingManager.ts
 var import_obsidian = require("obsidian");
+var import_view = require("@codemirror/view");
 
 // src/utils/colors.ts
 var HIGHLIGHT_COLORS = ["red", "orange", "yellow", "green", "blue", "purple"];
@@ -203,7 +205,7 @@ var FloatingManager = class {
     this.registerEvents();
   }
   /**
-   * The document the toolbar belongs in — the one holding the reading view,
+   * The document the toolbar belongs in — the one holding the note,
    * not whichever window happens to be focused.
    *
    * `activeDocument` follows focus, and in Obsidian 1.13 the settings window
@@ -272,34 +274,51 @@ var FloatingManager = class {
     return btn;
   }
   registerEvents() {
-    const preventFocus = (evt) => {
-      evt.preventDefault();
-      evt.stopPropagation();
-    };
-    const attachAction = (btn, actionName) => {
+    const attachAction = (btn, readingAction, mode, color) => {
       if (!btn) return;
       const handler = (evt) => {
-        preventFocus(evt);
+        evt.preventDefault();
+        evt.stopPropagation();
         const view = this.plugin.getActiveReadingView();
-        if (view) void this.plugin[actionName](view, this._selectionSnapshot);
+        if (view) {
+          void readingAction(view);
+        } else {
+          const editor = this.getActiveToolbarEditor();
+          if (editor) this.plugin.editEditorHighlight(editor, mode, color);
+        }
         this.hide();
       };
       btn.addEventListener("mousedown", handler);
       btn.addEventListener("touchstart", handler, { passive: false });
     };
-    attachAction(this.highlightBtn, "highlightSelection");
-    attachAction(this.removeBtn, "removeHighlightSelection");
-    this.colorButtons.forEach((btn) => {
-      const index = Number(btn.getAttribute("data-color-index"));
-      const handler = (evt) => {
-        preventFocus(evt);
-        const view = this.plugin.getActiveReadingView();
-        if (view) void this.plugin.applyColorByIndex(view, index, this._selectionSnapshot);
-        this.hide();
-      };
-      btn.addEventListener("mousedown", handler);
-      btn.addEventListener("touchstart", handler, { passive: false });
-    });
+    attachAction(
+      this.highlightBtn,
+      (view) => this.plugin.highlightSelection(view, this._selectionSnapshot),
+      "highlight"
+    );
+    attachAction(
+      this.removeBtn,
+      (view) => this.plugin.removeHighlightSelection(view, this._selectionSnapshot),
+      "remove"
+    );
+    for (const [index, btn] of this.colorButtons.entries()) {
+      attachAction(
+        btn,
+        (view) => this.plugin.applyColorByIndex(view, index, this._selectionSnapshot),
+        "color",
+        HIGHLIGHT_COLORS[index]
+      );
+    }
+  }
+  getActiveToolbarEditor() {
+    if (!this.plugin.settings.showToolbarInEditor) return null;
+    const view = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
+    if ((view == null ? void 0 : view.getMode()) !== "source") return null;
+    const editor = import_view.EditorView.findFromDOM(view.contentEl);
+    if (!(editor == null ? void 0 : editor.hasFocus) || editor.state.readOnly || editor.state.selection.ranges.length !== 1) return null;
+    if (editor.dom.ownerDocument.querySelector(".modal-container, .modal-bg")) return null;
+    const { from, to } = editor.state.selection.main;
+    return editor.state.sliceDoc(from, to).trim() ? editor : null;
   }
   setupMobileGestures() {
     if (!import_obsidian.Platform.isIosApp) return;
@@ -362,15 +381,22 @@ var FloatingManager = class {
   }
   /** Internal: actually process the current selection state. */
   _doHandleSelection() {
-    var _a;
+    var _a, _b;
     const view = this.plugin.getActiveReadingView();
     if (!view) {
       this._selectionSnapshot = null;
-      this.hide();
+      const editor = this.getActiveToolbarEditor();
+      if (editor) {
+        const { head, anchor } = editor.state.selection.main;
+        const rect = (_a = editor.coordsAtPos(head, head > anchor ? -1 : 1)) != null ? _a : editor.coordsAtPos(anchor);
+        this.show(rect != null ? rect : editor.scrollDOM.getBoundingClientRect());
+      } else {
+        this.hide();
+      }
       return;
     }
     const sel = window.getSelection();
-    const snippet = (_a = sel == null ? void 0 : sel.toString()) != null ? _a : "";
+    const snippet = (_b = sel == null ? void 0 : sel.toString()) != null ? _b : "";
     const scope = (sel == null ? void 0 : sel.anchorNode) && this.plugin.getSelectionScope(view, sel.anchorNode);
     const inView = !!scope && !!(sel == null ? void 0 : sel.focusNode) && scope.root.contains(sel.focusNode);
     if (inView && snippet.trim() && sel && !sel.isCollapsed && sel.rangeCount > 0) {
@@ -424,12 +450,12 @@ var FloatingManager = class {
           top = rect.top - containerHeight - 60;
         }
         if (top < margin) top = margin;
-        const left = clampLeft(rect.left + rect.width / 2 - containerWidth / 2);
+        const left = clampLeft((rect.left + rect.right - containerWidth) / 2);
         this.containerEl.setCssStyles({ top: `${top}px`, left: `${left}px` });
       } else {
         let top = rect.top - containerHeight - margin;
         if (top < margin) top = rect.bottom + margin;
-        const left = clampLeft(rect.left + rect.width / 2 - containerWidth / 2);
+        const left = clampLeft((rect.left + rect.right - containerWidth) / 2);
         this.containerEl.setCssStyles({ top: `${top}px`, left: `${left}px` });
       }
     } else if (pos === "top") {
@@ -3070,6 +3096,7 @@ function editHighlightRange(raw, start, end, mode, color) {
 var SMART_SELECTION_TAGS = /* @__PURE__ */ new Set(["P", "LI", "BLOCKQUOTE", "PRE", "H1", "H2", "H3", "H4", "H5", "H6", "TD", "TH"]);
 var DEFAULT_SETTINGS = {
   toolbarPosition: "text",
+  showToolbarInEditor: false,
   defaultHighlightColor: "",
   enableHaptics: true,
   showRemoveButton: true,
@@ -3096,6 +3123,13 @@ var ReadingHighlighterPlugin = class extends import_obsidian6.Plugin {
     this.registerView(HIGHLIGHT_NAVIGATOR_VIEW, (leaf) => new HighlightNavigatorView(leaf, this));
     this.addSettingTab(new ReadingHighlighterSettingTab(this.app, this));
     this.registerCommands();
+    this.registerEditorExtension(
+      import_view2.EditorView.updateListener.of((update) => {
+        if (this.settings.showToolbarInEditor && (update.selectionSet || update.focusChanged || update.docChanged)) {
+          this.floatingManager.handleSelection();
+        }
+      })
+    );
     this.registerWindowEvents(this.floatingManager.targetDocument());
     this.registerEvent(this.app.workspace.on("window-open", (win) => this.registerWindowEvents(win.doc)));
     this.registerEvent(
@@ -3733,15 +3767,43 @@ var ReadingHighlighterPlugin = class extends import_obsidian6.Plugin {
     const lineBreak = raw.indexOf("\n", offset);
     return lineBreak === -1 ? raw.length : lineBreak;
   }
+  editSelectionRange(raw, start, end, mode, payload) {
+    const touched = parseHighlights(raw).highlights.find((h) => h.innerStart < end && h.innerEnd > start);
+    const color = (mode === "color" || mode === "toggle-color") && isHighlightColor(payload) ? payload : touched ? touched.color : this.settings.defaultHighlightColor || null;
+    return editHighlightRange(raw, start, end, mode, color);
+  }
+  editEditorHighlight(editor, mode, color) {
+    const { from, to } = editor.state.selection.main;
+    const raw = editor.state.doc.toString();
+    let updated;
+    try {
+      updated = this.editSelectionRange(raw, from, to, mode, color);
+    } catch (error) {
+      new import_obsidian6.Notice(error instanceof Error ? error.message : "The selection cannot be highlighted safely.");
+      return;
+    }
+    if (updated === raw) return;
+    let start = 0;
+    let end = raw.length;
+    let newEnd = updated.length;
+    while (start < end && start < newEnd && raw[start] === updated[start]) start++;
+    while (end > start && newEnd > start && raw[end - 1] === updated[newEnd - 1]) {
+      end--;
+      newEnd--;
+    }
+    editor.dispatch({
+      changes: { from: start, to: end, insert: updated.slice(start, newEnd) },
+      selection: { anchor: newEnd },
+      userEvent: "input.replace"
+    });
+  }
   async applyMarkdownModification(file, raw, start, end, mode, payload = "") {
     if (!raw) {
       raw = await this.app.vault.read(file);
     }
-    const touched = parseHighlights(raw).highlights.find((h) => h.innerStart < end && h.innerEnd > start);
-    const color = (mode === "color" || mode === "toggle-color") && isHighlightColor(payload) ? payload : touched ? touched.color : this.settings.defaultHighlightColor || null;
     let newContent;
     try {
-      newContent = editHighlightRange(raw, start, end, mode, color);
+      newContent = this.editSelectionRange(raw, start, end, mode, payload);
     } catch (error) {
       new import_obsidian6.Notice(error instanceof Error ? error.message : "The selection cannot be highlighted safely.");
       return false;
@@ -3822,6 +3884,11 @@ var ReadingHighlighterSettingTab = class extends import_obsidian6.PluginSettingT
                 right: "Fixed right side"
               }
             }
+          },
+          {
+            name: "Show toolbar in editing mode",
+            desc: "Show the floating toolbar when selecting text in Live Preview or Source mode.",
+            control: { type: "toggle", key: "showToolbarInEditor" }
           },
           {
             name: "Enable smart paragraph selection",

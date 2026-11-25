@@ -38,6 +38,7 @@ export class Plugin extends Component {
         return { addClass() {} };
     }
     addSettingTab() {}
+    registerEditorExtension() {}
     registerView() {}
     registerMarkdownPostProcessor() {}
     async loadData() {

@@ -1,9 +1,9 @@
 {
     "id": "superior-highlighter",
     "name": "Superior Highlighter",
-    "version": "0.2.3",
+    "version": "0.3.0",
     "minAppVersion": "1.14.0",
-    "description": "Highlight exact selections in Reading View using surrounding context and native colours.",
+    "description": "Highlight exact selections with native colours in Reading View and optionally in editing mode.",
     "author": "WooJIN OH",
     "authorUrl": "https://github.com/owjxyz",
     "isDesktopOnly": false

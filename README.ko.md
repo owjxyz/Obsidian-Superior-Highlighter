@@ -15,7 +15,7 @@ Obsidian 읽기 보기에서 선택한 부분을 정확하게 하이라이트합
 ## 설치와 사용
 
 1. **설정 → 커뮤니티 플러그인 → 탐색**에서 **Superior Highlighter**를 검색해 설치하고 활성화합니다.
-2. **읽기 보기**에서 텍스트를 선택하고 툴바의 기능을 누릅니다.
+2. **읽기 보기**에서 텍스트를 선택하고 툴바의 기능을 누릅니다. **라이브 프리뷰**나 **소스 모드**에서도 툴바를 쓰려면 플러그인 설정에서 **Show toolbar in editing mode**를 켭니다.
 3. 단축키는 **설정 → 단축키 → Superior Highlighter**에서 지정합니다.
 
 수동 설치: [최신 배포](https://github.com/owjxyz/Obsidian-Superior-Highlighter/releases/latest)의 `main.js`, `manifest.json`, `styles.css`를 `<vault>/.obsidian/plugins/superior-highlighter/`에 넣고 플러그인을 활성화합니다.
